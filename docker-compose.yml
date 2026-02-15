@@ -43,9 +43,8 @@ services:
       - N8N_BASIC_AUTH_USER=admin
       - N8N_BASIC_AUTH_PASSWORD=changeme
       - NODE_ENV=production
-      # Set these so the "Hex – Invoice from email" workflow can call Hex Billing:
-      # - N8N_API_SECRET=<same as Hex Billing .env>
-      # - BILLING_BASE_URL=http://host.docker.internal:3000
+      - N8N_API_SECRET=pb2ac21085056d30a6a8b920ef3908cf80c0b89445773eef8a860d965dac1d93a
+      - BILLING_BASE_URL=https://billing-test.hex.inc
     volumes:
       - n8n_data:/home/node/.n8n
     networks:
