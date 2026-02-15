@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Contract — {{client_name}}</title>
+  <style>
+    body { font-family: Georgia, serif; font-size: 11pt; line-height: 1.5; color: #1a1a1a; max-width: 700px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 16pt; margin-bottom: 8px; }
+    .meta { font-size: 10pt; color: #555; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+    th { background: #f5f5f5; font-weight: 600; }
+    .section { margin: 20px 0; }
+    .section-title { font-weight: 600; margin-bottom: 8px; }
+    .signature-block { margin-top: 32px; }
+    .signature-line { border-bottom: 1px solid #000; width: 240px; margin-top: 24px; display: inline-block; }
+    .term-highlight { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Professional Services Agreement</h1>
+  <p class="meta">Hex Studio — {{client_name}}</p>
+
+  <div class="section">
+    <div class="section-title">Parties</div>
+    <p><strong>Client:</strong> {{client_name}}{{#if contact_name}} — {{contact_name}}{{/if}}{{#if contact_email}} ({{contact_email}}){{/if}}</p>
+    <p><strong>Service Provider:</strong> Hex Studio</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Engagement</div>
+    <p>Plan: <strong>{{plan_name}}</strong></p>
+    <p>Total contract value: <strong>{{total_amount_formatted}}</strong></p>
+    <p>Project term: <span class="term-highlight">{{project_term_display}}</span> (first occurrence).</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Payment schedule</div>
+    <p>All amounts in USD. The project duration is <span class="term-highlight">{{project_term_display}}</span> (second occurrence).</p>
+    <table>
+      <thead>
+        <tr><th>#</th><th>Amount</th><th>Timing</th></tr>
+      </thead>
+      <tbody>
+        {{#each installments}}
+        <tr>
+          <td>{{this.number}}</td>
+          <td>${{formatNumber this.amount}}</td>
+          <td>{{this.timing}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{#unless installments.length}}
+    <p><em>No installments specified.</em></p>
+    {{/unless}}
+  </div>
+
+  <div class="section">
+    <div class="section-title">Term and kickoff</div>
+    <p>This agreement covers a project term of <span class="term-highlight">{{project_term_display}}</span> (third occurrence).</p>
+    <p>Kickoff date: <strong>{{kickoff_display}}</strong>.</p>
+  </div>
+
+  <div class="section signature-block">
+    <p><strong>Hex Studio</strong></p>
+    <p>Signature: <span class="signature-line"></span> Date: _______________</p>
+    <p style="margin-top: 24px;"><strong>{{client_name}}</strong></p>
+    <p>Signature: <span class="signature-line"></span> Date: _______________</p>
+  </div>
+</body>
+</html>

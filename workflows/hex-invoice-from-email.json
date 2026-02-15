@@ -1,0 +1,199 @@
+{
+  "name": "Hex – Invoice from email (revised scope)",
+  "nodes": [
+    {
+      "id": "trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "simple": false,
+        "filters": {
+          "include": {
+            "subjectOrBody": "invoice"
+          }
+        }
+      },
+      "credentials": { "gmailOAuth2": { "id": "GMAIL_FATHER_CREDENTIAL_ID", "name": "Gmail account (Father)" } },
+      "webhookId": "hex-invoice-trigger"
+    },
+    {
+      "id": "filter-invoice",
+      "name": "Only if contains invoice",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.subject }}", "rightValue": "invoice", "operator": { "type": "string", "operation": "contains" } },
+            { "id": "c2", "leftValue": "={{ $json.textPlain || $json.snippet || '' }}", "rightValue": "invoice", "operator": { "type": "string", "operation": "contains" } }
+          ],
+          "combinator": "or"
+        }
+      }
+    },
+    {
+      "id": "extract-client",
+      "name": "Extract client name",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "parameters": {
+        "jsCode": "// Extract a possible client name from subject + body (might be partial).\nconst item = $input.first();\nconst subject = (item.json.subject || '').trim();\nconst body = (item.json.textPlain || item.json.snippet || item.json.body || '').trim();\nconst text = `${subject} ${body}`;\n\nlet clientName = '';\n// Try \"client: X\" or \"client - X\" or \"for X\"\nconst clientMatch = text.match(/client\\s*[:\\-]\\s*([^\\n,]+)/i) || text.match(/for\\s+([^\\n,.]+)/i);\nif (clientMatch) {\n  clientName = clientMatch[1].trim();\n} else {\n  // Fallback: use first line of body or subject (strip common prefixes)\n  const firstLine = (body || subject).split(/[\\n\\r]+/)[0].trim();\n  if (firstLine && firstLine.length > 0 && firstLine.length < 120) {\n    clientName = firstLine.replace(/^(re:\\s*|fwd:\\s*|invoice\\s*:?\\s*)/i, '').trim();\n  }\n}\n\nreturn { json: { ...item.json, clientNameExtracted: clientName || 'Unknown Client' } };"
+      }
+    },
+    {
+      "id": "get-clients",
+      "name": "Get clients (billing)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BILLING_BASE_URL || 'http://host.docker.internal:3000' }}/api/clients",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.N8N_API_SECRET }}" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "find-client",
+      "name": "Find client by partial name",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "parameters": {
+        "jsCode": "// Get extracted name from previous step (GET response overwrites item)\nconst extractNode = $('Extract client name').first().json;\nconst clientNameExtracted = extractNode.clientNameExtracted || '';\nconst raw = $input.first().json;\nconst list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.data) ? raw.data : []);\nconst search = (clientNameExtracted || '').toLowerCase().trim();\n\nlet match = null;\nif (search) {\n  match = list.find(c => {\n    const name = (c.name || c.companyName || '').toLowerCase();\n    return name.includes(search) || search.includes(name);\n  });\n}\n\nconst clientId = match ? match.id : null;\nconst clientName = match ? (match.name || match.companyName) : clientNameExtracted;\nreturn { json: { ...extractNode, clientId, clientName, needCreate: !clientId } };"
+      }
+    },
+    {
+      "id": "if-need-create",
+      "name": "Need to create client?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [{ "id": "need", "leftValue": "={{ $json.needCreate }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }]
+        }
+      }
+    },
+    {
+      "id": "create-client",
+      "name": "Create client (billing)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BILLING_BASE_URL || 'http://host.docker.internal:3000' }}/api/clients",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.N8N_API_SECRET }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "name", "value": "={{ $json.clientNameExtracted || $json.clientName }}" },
+            { "name": "dateSigned", "value": "={{ $now.format('yyyy-MM-dd') }}" },
+            { "name": "totalDealSize", "value": 0 },
+            { "name": "kickoffDate", "value": "={{ $now.format('yyyy-MM-dd') }}" },
+            { "name": "proposedEndDate", "value": "={{ $now.plus(1, 'year').format('yyyy-MM-dd') }}" },
+            { "name": "numInstallments", "value": 1 }
+          ]
+        },
+        "specifyBody": "json"
+      },
+      "notesInFlow": true,
+      "notes": "Minimal client; edit body if you need more fields."
+    },
+    {
+      "id": "merge",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1780, 300],
+      "parameters": { "mode": "combine", "mergeByFields": { "values": [] }, "options": {} }
+    },
+    {
+      "id": "ensure-client-id",
+      "name": "Ensure clientId",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst item = items[0];\nconst json = item.json;\n// From create-client branch we get created client with .id; from find branch we have .clientId\nconst clientId = json.id ?? json.clientId;\nconst clientName = json.name ?? json.clientName ?? json.clientNameExtracted;\nreturn { json: { ...json, clientId, clientName } };"
+      }
+    },
+    {
+      "id": "create-invoice",
+      "name": "Create invoice (billing)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BILLING_BASE_URL || 'http://host.docker.internal:3000' }}/api/invoices",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.N8N_API_SECRET }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"clientId\": {{ $json.clientId }},\n  \"stage\": \"From n8n\",\n  \"amount\": 0,\n  \"plannedInvoiceDate\": \"{{ $now.format('yyyy-MM-dd') }}\",\n  \"okayToInvoice\": false,\n  \"invoiced\": false\n}"
+      }
+    },
+    {
+      "id": "reply-done",
+      "name": "Reply Done",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2440, 300],
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $('Gmail Trigger').first().json.id }}",
+        "threadId": "={{ $('Gmail Trigger').first().json.threadId }}",
+        "message": "done",
+        "options": {}
+      },
+      "credentials": { "gmailOAuth2": { "id": "GMAIL_FATHER_CREDENTIAL_ID", "name": "Gmail account (Father)" } }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": { "main": [[{ "node": "Only if contains invoice", "type": "main", "index": 0 }]] },
+    "Only if contains invoice": { "main": [[{ "node": "Extract client name", "type": "main", "index": 0 }]] },
+    "Extract client name": { "main": [[{ "node": "Get clients (billing)", "type": "main", "index": 0 }]] },
+    "Get clients (billing)": { "main": [[{ "node": "Find client by partial name", "type": "main", "index": 0 }]] },
+    "Find client by partial name": { "main": [[{ "node": "Need to create client?", "type": "main", "index": 0 }]] },
+    "Need to create client?": {
+      "main": [
+        [{ "node": "Create client (billing)", "type": "main", "index": 0 }],
+        [{ "node": "Merge", "type": "main", "index": 1 }]
+      ]
+    },
+    "Create client (billing)": { "main": [[{ "node": "Merge", "type": "main", "index": 0 }]] },
+    "Merge": { "main": [[{ "node": "Ensure clientId", "type": "main", "index": 0 }]] },
+    "Ensure clientId": { "main": [[{ "node": "Create invoice (billing)", "type": "main", "index": 0 }]] },
+    "Create invoice (billing)": { "main": [[{ "node": "Reply Done", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": { "templateCredsSetupCompleted": false }
+}

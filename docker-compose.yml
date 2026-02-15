@@ -1,0 +1,62 @@
+# Hex Studio deal-to-invoice: PDF microservices (+ optional n8n)
+# From project root: docker-compose up -d
+# n8n can call: http://pdf-renderer:3100/render-pdf and http://contract-generator:3200/generate-contract
+
+services:
+  pdf-renderer:
+    build: ./microservices/pdf-renderer
+    ports:
+      - "3100:3100"
+    environment:
+      - PORT=3100
+      - RENDER_TIMEOUT_MS=30000
+    networks:
+      - hex-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3100/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>process.exit(r.statusCode===200?0:1));}).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  contract-generator:
+    build: ./microservices/contract-generator
+    ports:
+      - "3200:3200"
+    environment:
+      - PORT=3200
+    networks:
+      - hex-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3200/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>process.exit(r.statusCode===200?0:1));}).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=changeme
+      - NODE_ENV=production
+      # Set these so the "Hex – Invoice from email" workflow can call Hex Billing:
+      # - N8N_API_SECRET=<same as Hex Billing .env>
+      # - BILLING_BASE_URL=http://host.docker.internal:3000
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - hex-net
+    depends_on:
+      pdf-renderer: { condition: service_healthy }
+      contract-generator: { condition: service_healthy }
+
+networks:
+  hex-net:
+    driver: bridge
+
+volumes:
+  n8n_data:
